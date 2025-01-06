@@ -31,30 +31,29 @@ func main() {
 	}
 
 	http.HandleFunc("/cotacao", func(w http.ResponseWriter, r *http.Request) {
-		// Contexto para consultar a API
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
 		defer cancel()
-
+	
 		cotacao, err := buscarCotacao(ctx)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Erro ao buscar cotação: %v", err), http.StatusInternalServerError)
 			log.Println("Erro ao buscar cotação:", err)
 			return
 		}
-
-		// Contexto para salvar no banco de dados
+	
 		dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer dbCancel()
-
+	
 		if err := salvarCotacao(dbCtx, db, cotacao); err != nil {
 			http.Error(w, fmt.Sprintf("Erro ao salvar cotação: %v", err), http.StatusInternalServerError)
 			log.Println("Erro ao salvar cotação:", err)
 			return
 		}
-
-		// Responde ao cliente com o valor da cotação
+	
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cotacao)
+		if err := json.NewEncoder(w).Encode(cotacao); err != nil {
+			log.Println("Erro ao codificar resposta JSON:", err)
+		}
 	})
 
 	log.Println("Servidor iniciado na porta 8080")
@@ -62,24 +61,30 @@ func main() {
 }
 
 func buscarCotacao(ctx context.Context) (*Cotacao, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://economia.awesomeapi.com.br/json/last/USD-BRL", nil)
-	if err != nil {
-		return nil, err
-	}
+    req, err := http.NewRequestWithContext(ctx, "GET", "https://economia.awesomeapi.com.br/json/last/USD-BRL", nil)
+    if err != nil {
+        return nil, err
+    }
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
 
-	var data map[string]map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
-	}
+    var data map[string]map[string]string
+    if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+        return nil, fmt.Errorf("Erro ao decodificar resposta da API externa: %w", err)
+    }
 
-	return &Cotacao{Bid: data["USDBRL"]["bid"]}, nil
+    bid, ok := data["USDBRL"]["bid"]
+    if !ok || bid == "" {
+        return nil, fmt.Errorf("Campo 'bid' não encontrado ou vazio na resposta da API externa")
+    }
+
+    return &Cotacao{Bid: bid}, nil
 }
+
 
 func salvarCotacao(ctx context.Context, db *sql.DB, cotacao *Cotacao) error {
 	query := "INSERT INTO cotacoes (bid) VALUES (?)"

@@ -12,7 +12,7 @@ import (
 
 func main() {
 	// Contexto para fazer a requisição
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3000*time.Millisecond)
 	defer cancel()
 
 	cotacao, err := buscarCotacao(ctx)
@@ -48,21 +48,22 @@ func buscarCotacao(ctx context.Context) (*Cotacao, error) {
     }
     defer resp.Body.Close()
 
-    // Verifica o status HTTP
-    if resp.StatusCode != http.StatusOK {
+    // Lê e decodifica a resposta do servidor
+    var cotacao Cotacao
+    if err := json.NewDecoder(resp.Body).Decode(&cotacao); err != nil {
         body, _ := ioutil.ReadAll(resp.Body)
-        return nil, fmt.Errorf("Erro do servidor: %s", string(body))
+        return nil, fmt.Errorf("Erro ao decodificar resposta: %w. JSON recebido: %s", err, string(body))
     }
 
-    var response Response
-    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-        return nil, fmt.Errorf("Erro ao decodificar resposta: %w", err)
+    if cotacao.Bid == "" {
+        return nil, fmt.Errorf("Campo 'bid' vazio na resposta do servidor. JSON recebido: %+v", cotacao)
     }
 
-    return &response.USDBRL, nil
+    return &cotacao, nil
 }
 
 func salvarCotacaoEmArquivo(valor string) error {
-	conteudo := fmt.Sprintf("Dólar: %s\n", valor)
-	return ioutil.WriteFile("client/cotacao.txt", []byte(conteudo), 0644)
+    conteudo := fmt.Sprintf("Dólar: %s\n", valor)
+    caminho := "client/cotacao.txt"
+    return ioutil.WriteFile(caminho, []byte(conteudo), 0644)
 }
